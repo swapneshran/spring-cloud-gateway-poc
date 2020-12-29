@@ -64,39 +64,40 @@ public class CorsConfiguration {
         return (ServerWebExchange exchange, WebFilterChain chain) -> {
             ServerHttpRequest request = exchange.getRequest();
             Flux<DataBuffer> dataBufferFlux = request.getBody();
-            return DataBufferUtils.join(exchange.getRequest().getBody())
-                    .flatMap(dataBuffer -> {
-                        byte[] bytes = new byte[dataBuffer.readableByteCount()];
-                        dataBuffer.read(bytes);
-                        try {
-                            String bodyString = new String(bytes, "utf-8");
-                            XssStringValidator xssStringValidator = new XssStringValidator();
-                            if(!xssStringValidator.isGoodHtmlString(bodyString)){
-                                return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST));
+            if (request.getMethod() == HttpMethod.POST && request.getMethod() == HttpMethod.DELETE && request.getMethod() == HttpMethod.PUT) {
+                return DataBufferUtils.join(exchange.getRequest().getBody())
+                        .flatMap(dataBuffer -> {
+                            byte[] bytes = new byte[dataBuffer.readableByteCount()];
+                            dataBuffer.read(bytes);
+                            try {
+                                String bodyString = new String(bytes, "utf-8");
+                                XssStringValidator xssStringValidator = new XssStringValidator();
+                                if (!xssStringValidator.isGoodHtmlString(bodyString)) {
+                                    return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST));
+                                }
+                            } catch (UnsupportedEncodingException e) {
+                                e.printStackTrace();
                             }
-                        } catch (UnsupportedEncodingException e) {
-                            e.printStackTrace();
-                        }
-                        DataBufferUtils.release(dataBuffer);
-                        Flux<DataBuffer> cachedFlux = Flux.defer(() -> {
-                            DataBuffer buffer = exchange.getResponse().bufferFactory()
-                                    .wrap(bytes);
-                            return Mono.just(buffer);
+                            DataBufferUtils.release(dataBuffer);
+                            Flux<DataBuffer> cachedFlux = Flux.defer(() -> {
+                                DataBuffer buffer = exchange.getResponse().bufferFactory()
+                                        .wrap(bytes);
+                                return Mono.just(buffer);
+                            });
+
+                            ServerHttpRequest mutatedRequest = new ServerHttpRequestDecorator(
+                                    exchange.getRequest()) {
+                                @Override
+                                public Flux<DataBuffer> getBody() {
+                                    return cachedFlux;
+                                }
+                            };
+                            return chain.filter(exchange.mutate().request(mutatedRequest)
+                                    .build());
                         });
-
-                        ServerHttpRequest mutatedRequest = new ServerHttpRequestDecorator(
-                                exchange.getRequest()) {
-                            @Override
-                            public Flux<DataBuffer> getBody() {
-                                return cachedFlux;
-                            }
-                        };
-                        return chain.filter(exchange.mutate().request(mutatedRequest)
-                                .build());
-                    });
+            };
+            return chain.filter(exchange);
         };
-
-
     }
 
 
